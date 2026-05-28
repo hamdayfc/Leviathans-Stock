@@ -15,18 +15,18 @@ const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const MONGO_URI = process.env.MONGO_URI;
 
-// سيرفر Express للحفاظ على تشغيل البوت في Render
+// Express server to keep the bot alive on Render
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get("/", (req, res) => res.send("Leviathans Bot is running perfectly with MongoDB!"));
 app.listen(PORT, () => console.log(`Web server is active on port ${PORT}`));
 
-// الاتصال بقاعدة بيانات MongoDB
+// Connect to MongoDB
 mongoose.connect(MONGO_URI)
   .then(() => console.log("Connected to MongoDB successfully"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
-// إعداد جداول البيانات
+// Data Schemas
 const UserSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   coins: { type: Number, default: 0 },
@@ -50,7 +50,7 @@ const client = new Client({
   ]
 });
 
-// نظام كسب الكوينز التلقائي من الشات
+// Passive Chat Coins System (1 coin every 15 seconds)
 client.on("messageCreate", async (msg) => {
   if (!msg.guild || msg.author.bot) return;
 
@@ -65,9 +65,9 @@ client.on("messageCreate", async (msg) => {
   }
 });
 
-// تسجيل أوامر السلاش
+// Register Slash Commands
 const commands = [
-  new SlashCommandBuilder().setName("balance").setDescription("Check your coins"),
+  new SlashCommandBuilder().setName("balance").setDescription("Check your coins balance"),
   new SlashCommandBuilder().setName("shop").setDescription("View the server shop"),
   new SlashCommandBuilder()
     .setName("additem")
@@ -112,52 +112,56 @@ client.once("ready", async () => {
   }
 });
 
-// معالجة التفاعل مع الأوامر
+// Handle Interactions
 client.on("interactionCreate", async (i) => {
   if (!i.isChatInputCommand()) return;
 
   let u = await User.findOne({ id: i.user.id });
   if (!u) u = new User({ id: i.user.id });
 
+  // Balance Command
   if (i.commandName === "balance") {
     return await i.reply({
-      embeds: [new EmbedBuilder().setTitle("Leviathans Balance").setDescription(`لديك حاليا: **${u.coins}** كوينز.`).setColor(0x00ff00)]
+      embeds: [new EmbedBuilder().setTitle("💰 Leviathans Balance").setDescription(`You currently have: **${u.coins}** coins.`).setColor(0x00ff00)]
     });
   }
 
+  // Shop Command
   if (i.commandName === "shop") {
     const items = await ShopItem.find({});
     return await i.reply({
       embeds: [
         new EmbedBuilder()
-          .setTitle("Leviathans Shop")
-          .setDescription(items.length ? items.map(v => `**${v.name}**\nالسعر: ${v.price} كوينز | المخزون: ${v.stock}`).join("\n\n") : "المتجر فارغ حاليا!")
+          .setTitle("🏪 Leviathans Shop")
+          .setDescription(items.length ? items.map(v => `📦 **${v.name}**\nPrice: ${v.price} coins | Stock: ${v.stock}`).join("\n\n") : "The shop is currently empty!")
           .setColor(0x3498db)
       ]
     });
   }
 
+  // Add Item Command (Admin Only)
   if (i.commandName === "additem") {
     const name = i.options.getString("name");
     const price = i.options.getInteger("price");
     const stock = i.options.getInteger("stock");
 
-    if (price < 0 || stock < 0) return await i.reply({ content: "لا يمكن وضع قيم سالبة للمنتج!", ephemeral: true });
+    if (price < 0 || stock < 0) return await i.reply({ content: "❌ Item price or stock cannot be negative!", ephemeral: true });
 
     await ShopItem.findOneAndUpdate({ name }, { price, stock }, { upsert: true });
-    return await i.reply(`تم إضافة وتحديث المنتج **${name}** بنجاح في المتجر.`);
+    return await i.reply(`✅ Item **${name}** has been successfully added/updated in the shop.`);
   }
 
+  // Buy Command
   if (i.commandName === "buy") {
     const name = i.options.getString("item");
     const amount = i.options.getInteger("amount");
 
     const item = await ShopItem.findOne({ name });
-    if (!item) return await i.reply({ content: "هذا المنتج غير موجود بالمتجر!", ephemeral: true });
-    if (amount <= 0 || item.stock < amount) return await i.reply({ content: "الكمية المحددة غير صالحة أو نفذت من المخزون!", ephemeral: true });
+    if (!item) return await i.reply({ content: "❌ This item does not exist in the shop!", ephemeral: true });
+    if (amount <= 0 || item.stock < amount) return await i.reply({ content: "❌ Invalid quantity or out of stock!", ephemeral: true });
 
     const cost = item.price * amount;
-    if (u.coins < cost) return await i.reply({ content: `ليس لديك كوينز كافية! تكلفة الشراء هي ${cost} كوينز.`, ephemeral: true });
+    if (u.coins < cost) return await i.reply({ content: `❌ You don't have enough coins! Total cost is ${cost} coins.`, ephemeral: true });
 
     u.coins -= cost;
     item.stock -= amount;
@@ -169,10 +173,11 @@ client.on("interactionCreate", async (i) => {
     await item.save();
 
     return await i.reply({
-      embeds: [new EmbedBuilder().setTitle("عملية شراء ناجحة").setDescription(`لقد قمت بشراء **${amount}x ${name}** بنجاح!`).setColor(0x2ecc71)]
+      embeds: [new EmbedBuilder().setTitle("🛒 Purchase Successful").setDescription(`You have successfully bought **${amount}x ${name}**! It has been added to your inventory.`).setColor(0x2ecc71)]
     });
   }
 
+  // Inventory Command
   if (i.commandName === "inventory") {
     const target = i.options.getUser("user");
     const targetId = target ? target.id : i.user.id;
@@ -183,50 +188,4 @@ client.on("interactionCreate", async (i) => {
     const invArr = Array.from(targetUser.inv.entries());
 
     return await i.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`حقيبة الأغراض - ${target ? target.username : i.user.username}`)
-          .setDescription(invArr.length ? invArr.map(([n, c]) => `• **${n}** (العدد: x${c})`).join("\n") : "الحقيبة فارغة تماما!")
-          .setColor(0xf1c40f)
-      ]
-    });
-  }
-
-  if (i.commandName === "addcoins") {
-    const t = i.options.getUser("user");
-    const amount = i.options.getInteger("amount");
-    if (amount <= 0) return await i.reply({ content: "الكمية يجب ان تكون اكبر من صفر!", ephemeral: true });
-
-    let tu = await User.findOne({ id: t.id });
-    if (!tu) tu = new User({ id: t.id });
-
-    tu.coins += amount;
-    await tu.save();
-    return await i.reply(`تم إضافة **${amount}** كوينز بنجاح إلى حساب <@${t.id}>.`);
-  }
-
-  if (i.commandName === "removecoins") {
-    const t = i.options.getUser("user");
-    const amount = i.options.getInteger("amount");
-    if (amount <= 0) return await i.reply({ content: "الكمية يجب ان تكون اكبر من صفر!", ephemeral: true });
-
-    let tu = await User.findOne({ id: t.id });
-    if (!tu) tu = new User({ id: t.id });
-
-    tu.coins -= amount;
-    if (tu.coins < 0) tu.coins = 0;
-    await tu.save();
-    return await i.reply(`تم سحب **${amount}** كوينز من حساب <@${t.id}>.`);
-  }
-
-  if (i.commandName === "leaderboard") {
-    const top = await User.find({}).sort({ coins: -1 }).limit(10);
-    const lb = top.map((userObj, idx) => `**#${idx + 1}** <@${userObj.id}> — **${userObj.coins}** كوينز`);
-
-    return await i.reply({
-      embeds: [new EmbedBuilder().setTitle("قائمة أغنى 10 أعضاء بالسيرفر").setDescription(lb.join("\n") || "لا توجد بيانات حاليا.").setColor(0xe67e22)]
-    });
-  }
-});
-
-client.login(TOKEN);
+      embeds:
