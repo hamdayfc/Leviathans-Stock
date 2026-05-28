@@ -3,8 +3,7 @@ const {
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder,
-  PermissionFlagsBits
+  SlashCommandBuilder
 } = require("discord.js");
 
 const fs = require("fs");
@@ -25,7 +24,7 @@ const client = new Client({
   ]
 });
 
-// 📦 data
+// 📦 Data
 let data = { users: {}, shop: {} };
 
 if (fs.existsSync("data.json")) {
@@ -43,7 +42,7 @@ function getUser(id) {
   return data.users[id];
 }
 
-// 💰 coins system (silent)
+// 💰 coins (silent)
 client.on("messageCreate", (msg) => {
   if (msg.author.bot) return;
 
@@ -57,7 +56,7 @@ client.on("messageCreate", (msg) => {
   }
 });
 
-// 🧾 SLASH COMMANDS (SAFE ONLY)
+// 🧾 Slash Commands (SAFE ONLY)
 const commands = [
   new SlashCommandBuilder()
     .setName("balance")
@@ -75,39 +74,27 @@ const commands = [
         .setDescription("Item name")
         .setRequired(true)
     ),
-
-  new SlashCommandBuilder()
-    .setName("additem")
-    .setDescription("Add item (admin only)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o =>
-      o.setName("name").setDescription("Item name").setRequired(true)
-    )
-    .addIntegerOption(o =>
-      o.setName("price").setDescription("Item price").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("removeitem")
-    .setDescription("Remove item (admin only)")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o =>
-      o.setName("name").setDescription("Item name").setRequired(true)
-    )
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
+// 🚀 Register commands
 client.once("ready", async () => {
-  console.log("Bot is ready");
+  console.log("Bot ready");
 
-  await rest.put(
-    Routes.applicationCommands(CLIENT_ID),
-    { body: commands }
-  );
+  try {
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+
+    console.log("Slash commands registered");
+  } catch (err) {
+    console.error("Command error:", err);
+  }
 });
 
-// 🎮 COMMAND HANDLER
+// 🎮 Commands handler
 client.on("interactionCreate", async (i) => {
   if (!i.isChatInputCommand()) return;
 
@@ -123,7 +110,9 @@ client.on("interactionCreate", async (i) => {
     if (items.length === 0)
       return i.reply("🏪 Shop is empty");
 
-    return i.reply(items.map(([n, p]) => `🏷️ ${n} - 💰 ${p}`).join("\n"));
+    return i.reply(
+      items.map(([n, p]) => `${n} - ${p}`).join("\n")
+    );
   }
 
   if (i.commandName === "buy") {
@@ -138,26 +127,7 @@ client.on("interactionCreate", async (i) => {
     user.coins -= data.shop[name];
     save();
 
-    return i.reply(`✅ Bought ${name}`);
-  }
-
-  if (i.commandName === "additem") {
-    const name = i.options.getString("name");
-    const price = i.options.getInteger("price");
-
-    data.shop[name] = price;
-    save();
-
-    return i.reply(`➕ Added ${name} (${price})`);
-  }
-
-  if (i.commandName === "removeitem") {
-    const name = i.options.getString("name");
-
-    delete data.shop[name];
-    save();
-
-    return i.reply(`🗑️ Removed ${name}`);
+    return i.reply(`✅ You bought ${name}`);
   }
 });
 
