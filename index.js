@@ -188,4 +188,53 @@ client.on("interactionCreate", async (i) => {
     const invArr = Array.from(targetUser.inv.entries());
 
     return await i.reply({
-      embeds:
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`🎒 ${target ? target.username : i.user.username}'s Inventory`)
+          .setDescription(invArr.length ? invArr.map(([n, c]) => `• **${n}** (Quantity: x${c})`).join("\n") : "This inventory is completely empty!")
+          .setColor(0xf1c40f)
+      ]
+    });
+  }
+
+  // Add Coins Command (Admin Only)
+  if (i.commandName === "addcoins") {
+    const t = i.options.getUser("user");
+    const amount = i.options.getInteger("amount");
+    if (amount <= 0) return await i.reply({ content: "❌ Amount must be greater than zero!", ephemeral: true });
+
+    let tu = await User.findOne({ id: t.id });
+    if (!tu) tu = new User({ id: t.id });
+
+    tu.coins += amount;
+    await tu.save();
+    return await i.reply(`💰 Successfully added **${amount}** coins to <@${t.id}>'s balance.`);
+  }
+
+  // Remove Coins Command (Admin Only)
+  if (i.commandName === "removecoins") {
+    const t = i.options.getUser("user");
+    const amount = i.options.getInteger("amount");
+    if (amount <= 0) return await i.reply({ content: "❌ Amount must be greater than zero!", ephemeral: true });
+
+    let tu = await User.findOne({ id: t.id });
+    if (!tu) tu = new User({ id: t.id });
+
+    tu.coins -= amount;
+    if (tu.coins < 0) tu.coins = 0;
+    await tu.save();
+    return await i.reply(`📉 Successfully removed **${amount}** coins from <@${t.id}>'s balance.`);
+  }
+
+  // Leaderboard Command
+  if (i.commandName === "leaderboard") {
+    const top = await User.find({}).sort({ coins: -1 }).limit(10);
+    const lb = top.map((userObj, idx) => `**#${idx + 1}** <@${userObj.id}> — 💰 **${userObj.coins}** coins`);
+
+    return await i.reply({
+      embeds: [new EmbedBuilder().setTitle("🏆 Top 10 Richest Users Leaderboard").setDescription(lb.join("\n") || "No data available yet.").setColor(0xe67e22)]
+    });
+  }
+});
+
+client.login(TOKEN);
