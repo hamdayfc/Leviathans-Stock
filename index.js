@@ -11,6 +11,9 @@ const {
 const express = require("express");
 const mongoose = require("mongoose");
 
+// 📁 استدعاء ملف الحالة الخارجي الجديد
+const { setBotStatus } = require("./status.js");
+
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const MONGO_URI = process.env.MONGO_URI;
@@ -104,6 +107,10 @@ const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
+  
+  // 🎮 استدعاء وتشغيل الحالة من ملف status.js التلقائي
+  setBotStatus(client);
+
   try {
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
     console.log("All Slash Commands registered successfully");
