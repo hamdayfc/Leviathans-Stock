@@ -3,31 +3,32 @@ const { Client, GatewayIntentBits, REST, Routes, PermissionFlagsBits } = require
 const mongoose = require("mongoose");
 const express = require('express');
 
+// إعداد سيرفر الـ Web ليبقى البوت "أونلاين"
 const app = express();
 app.get('/', (req, res) => res.send('Bot is active'));
 app.listen(process.env.PORT || 3000);
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
+// الاتصال بقاعدة البيانات
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ DB Connected"));
 
-const User = mongoose.model("User", new mongoose.Schema({ id: { type: String, required: true, unique: true }, coins: { type: Number, default: 0 }, inv: { type: Map, of: Number, default: {} } }));
+// تعريف المخططات (Schemas)
+const User = mongoose.model("User", new mongoose.Schema({ id: String, coins: { type: Number, default: 0 }, inv: { type: Map, of: Number, default: {} } }));
 const ShopItem = mongoose.model("ShopItem", new mongoose.Schema({ name: String, price: Number, quantity: { type: Number, default: 0 } }));
 
+// تسجيل الأوامر في ديسكورد
 const registerCommands = async () => {
     const commands = [
-        { name: "balance", description: "Check balance", options: [{ name: "target", description: "User", type: 6, required: false }] },
-        { name: "shop", description: "View shop" },
-        { name: "leaderboard", description: "Top 10" },
-        { name: "buy", description: "Buy item", options: [{ name: "item", description: "Name", type: 3, required: true }, { name: "amount", description: "Qty", type: 4, required: true }] },
-        { name: "additem", description: "Admin: Add/Stock item", default_member_permissions: "8", options: [
-            { name: "name", description: "Name", type: 3, required: true },
-            { name: "price", description: "Price", type: 4, required: true },
-            { name: "amount", description: "Quantity to add", type: 4, required: true }
+        { name: "balance", description: "رصيدك", options: [{ name: "target", description: "المستخدم", type: 6, required: false }] },
+        { name: "shop", description: "عرض المتجر" },
+        { name: "buy", description: "شراء عنصر", options: [{ name: "item", description: "اسم العنصر", type: 3, required: true }, { name: "amount", description: "الكمية", type: 4, required: true }] },
+        { name: "additem", description: "إضافة عنصر (للإدارة)", default_member_permissions: "8", options: [
+            { name: "name", description: "الاسم", type: 3, required: true },
+            { name: "price", description: "السعر", type: 4, required: true },
+            { name: "amount", description: "الكمية", type: 4, required: true }
         ]},
-        { name: "removeitem", description: "Admin: Remove item", default_member_permissions: "8", options: [{ name: "name", description: "Name", type: 3, required: true }] },
-        { name: "addcoins", description: "Admin: Add coins", default_member_permissions: "8", options: [{ name: "target", description: "User", type: 6, required: true }, { name: "amount", description: "Amount", type: 4, required: true }] },
-        { name: "removecoins", description: "Admin: Remove coins", default_member_permissions: "8", options: [{ name: "target", description: "User", type: 6, required: true }, { name: "amount", description: "Amount", type: 4, required: true }] }
+        { name: "addcoins", description: "إضافة رصيد (للإدارة)", default_member_permissions: "8", options: [{ name: "target", description: "المستخدم", type: 6, required: true }, { name: "amount", description: "المبلغ", type: 4, required: true }] }
     ];
     const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
@@ -49,55 +50,37 @@ client.on("interactionCreate", async (i) => {
             case "balance":
                 const target = i.options.getUser("target") || i.user;
                 const tU = await User.findOne({ id: target.id }) || { coins: 0 };
-                return i.editReply(`💰 ${target.username} balance: ${tU.coins}`);
+                i.editReply(`💰 رصيد ${target.username} هو: ${tU.coins}`);
+                break;
 
             case "shop":
                 const items = await ShopItem.find({});
-                return i.editReply(items.length ? items.map(x => `• ${x.name}: ${x.price} coins (Stock: ${x.quantity})`).join("\n") : "Shop is empty.");
-
-            case "leaderboard":
-                const top = await User.find({}).sort({ coins: -1 }).limit(10);
-                return i.editReply(`🏆 Top 10:\n${top.map((u, index) => `${index + 1}. <@${u.id}>: ${u.coins}`).join("\n") || "No data."}`);
+                i.editReply(items.length ? items.map(x => `• ${x.name} | السعر: ${x.price} | المتوفر: ${x.quantity}`).join("\n") : "المتجر فارغ.");
+                break;
 
             case "buy":
                 const name = i.options.getString("item").toLowerCase();
                 const amt = i.options.getInteger("amount");
                 const item = await ShopItem.findOne({ name });
-                if (!item || item.quantity < amt || u.coins < (item.price * amt)) return i.editReply("❌ Item not found, out of stock, or not enough coins!");
-                item.quantity -= amt;
-                await item.save();
-                u.coins -= (item.price * amt);
-                u.inv.set(name, (u.inv.get(name) || 0) + amt);
-                await u.save();
-                return i.editReply(`✅ Bought ${amt}x ${name}.`);
+                if (!item || item.quantity < amt || u.coins < (item.price * amt)) return i.editReply("❌ العنصر غير موجود، الكمية غير كافية، أو رصيدك لا يكفي!");
+                item.quantity -= amt; await item.save();
+                u.coins -= (item.price * amt); u.inv.set(name, (u.inv.get(name) || 0) + amt); await u.save();
+                i.editReply(`✅ تم شراء ${amt} من ${name} بنجاح.`);
+                break;
 
             case "additem":
-                if (!i.member.permissions.has(PermissionFlagsBits.Administrator)) return i.editReply("❌ Admins only.");
                 await ShopItem.updateOne({ name: i.options.getString("name") }, { name: i.options.getString("name"), price: i.options.getInteger("price"), $inc: { quantity: i.options.getInteger("amount") } }, { upsert: true });
-                return i.editReply("✅ Item added/updated with new stock.");
-
-            case "removeitem":
-                if (!i.member.permissions.has(PermissionFlagsBits.Administrator)) return i.editReply("❌ Admins only.");
-                await ShopItem.deleteOne({ name: i.options.getString("name") });
-                return i.editReply("✅ Item removed.");
+                i.editReply("✅ تم تحديث المتجر بنجاح.");
+                break;
 
             case "addcoins":
-            case "removecoins":
-                if (!i.member.permissions.has(PermissionFlagsBits.Administrator)) return i.editReply("❌ Admins only.");
-                const t = i.options.getUser("target");
-                let tU = await User.findOne({ id: t.id }) || await new User({ id: t.id }).save();
-                i.commandName === "addcoins" ? tU.coins += i.options.getInteger("amount") : tU.coins = Math.max(0, tU.coins - i.options.getInteger("amount"));
-                await tU.save();
-                return i.editReply(`✅ ${t.username} balance updated.`);
+                const targetUser = i.options.getUser("target");
+                let tU = await User.findOne({ id: targetUser.id }) || await new User({ id: targetUser.id }).save();
+                tU.coins += i.options.getInteger("amount"); await tU.save();
+                i.editReply(`✅ تم إضافة الرصيد لـ ${targetUser.username}.`);
+                break;
         }
-    } catch (e) { console.error(e); i.editReply("❌ Error occurred."); }
-});
-
-client.on("messageCreate", async (m) => {
-    if (m.content === "$reload" && m.member?.permissions.has(PermissionFlagsBits.Administrator)) {
-        await registerCommands();
-        m.reply("✅ Commands reloaded.");
-    }
+    } catch (e) { console.error(e); i.editReply("❌ حدث خطأ غير متوقع."); }
 });
 
 client.login(process.env.TOKEN);
