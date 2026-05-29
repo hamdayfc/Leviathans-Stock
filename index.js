@@ -1,10 +1,15 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, REST, Routes, EmbedBuilder } = require("discord.js");
 const mongoose = require("mongoose");
+const express = require('express');
+
+// --- 1. نظام الحفاظ على البوت نشطاً (Express) ---
+const app = express();
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(process.env.PORT || 3000);
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// نظام حفظ الداتا: الاتصال بقاعدة البيانات
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ DB Connected"));
 
 const User = mongoose.model("User", new mongoose.Schema({ id: String, coins: { type: Number, default: 0 }, inv: { type: Map, of: Number, default: {} } }));
@@ -20,15 +25,13 @@ client.once("ready", async () => {
         new SlashCommandBuilder().setName("removecoins").setDescription("Admin remove").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true))
     ];
     
-    // تسجيل الأوامر
     await new REST({ version: '10' }).setToken(process.env.TOKEN).put(Routes.applicationCommands(client.user.id), { body: commands });
     console.log("🚀 Bot is Online & Commands Registered!");
 });
 
-// نظام منع "Bot is thinking"
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
-    await i.deferReply(); // استجابة فورية لمنع التعليق
+    await i.deferReply(); 
     
     try {
         const u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
@@ -50,7 +53,7 @@ client.on("interactionCreate", async (i) => {
             const item = i.options.getString("item");
             const amt = i.options.getInteger("amount");
             u.inv.set(item, (u.inv.get(item) || 0) + amt);
-            await u.save(); // حفظ البيانات فوراً
+            await u.save();
             return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Purchased ${amt} of ${item}`)] });
         }
 
@@ -60,7 +63,7 @@ client.on("interactionCreate", async (i) => {
             if (u.coins < amt) return i.editReply("❌ Insufficient funds.");
             let tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
             u.coins -= amt; tU.coins += amt;
-            await u.save(); await tU.save(); // حفظ مزدوج للبيانات
+            await u.save(); await tU.save();
             return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Sent ${amt} to ${target.username}`)] });
         }
 
@@ -70,12 +73,12 @@ client.on("interactionCreate", async (i) => {
             let tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
             if (i.commandName === "addcoins") tU.coins += amt;
             else tU.coins = Math.max(0, tU.coins - amt);
-            await tU.save(); // حفظ بيانات الأدمن
+            await tU.save();
             return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ ${i.commandName} successful. New balance: ${tU.coins}`)] });
         }
     } catch (e) {
         console.error(e);
-        i.editReply("⚠️ Error occurred while processing your request.");
+        i.editReply("⚠️ Error occurred.");
     }
 });
 
