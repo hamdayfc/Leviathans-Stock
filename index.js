@@ -3,9 +3,9 @@ const { Client, GatewayIntentBits, SlashCommandBuilder, PermissionFlagsBits, RES
 const mongoose = require("mongoose");
 const express = require('express');
 
-// --- 1. نظام الحفاظ على البوت نشطاً (Express) ---
+// Express server for Render
 const app = express();
-app.get('/', (req, res) => res.send('Bot is running!'));
+app.get('/', (req, res) => res.send('Bot is active'));
 app.listen(process.env.PORT || 3000);
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -16,23 +16,34 @@ const User = mongoose.model("User", new mongoose.Schema({ id: String, coins: { t
 
 client.once("ready", async () => {
     const commands = [
-        new SlashCommandBuilder().setName("balance").setDescription("Check balance"),
-        new SlashCommandBuilder().setName("inventory").setDescription("View inv").addUserOption(o => o.setName("target").setDescription("User")),
-        new SlashCommandBuilder().setName("leaderboard").setDescription("Top 10 richest"),
-        new SlashCommandBuilder().setName("buy").setDescription("Buy items").addStringOption(o => o.setName("item").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
-        new SlashCommandBuilder().setName("transfer").setDescription("Transfer coins").addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
-        new SlashCommandBuilder().setName("addcoins").setDescription("Admin add").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
-        new SlashCommandBuilder().setName("removecoins").setDescription("Admin remove").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true))
+        new SlashCommandBuilder().setName("balance").setDescription("Check your current balance"),
+        new SlashCommandBuilder().setName("inventory").setDescription("View your inventory")
+            .addUserOption(o => o.setName("target").setDescription("The user to check")),
+        new SlashCommandBuilder().setName("leaderboard").setDescription("See the top 10 richest users"),
+        new SlashCommandBuilder().setName("buy").setDescription("Buy an item")
+            .addStringOption(o => o.setName("item").setDescription("Name of the item").setRequired(true))
+            .addIntegerOption(o => o.setName("amount").setDescription("Quantity to buy").setRequired(true)),
+        new SlashCommandBuilder().setName("transfer").setDescription("Transfer coins to someone")
+            .addUserOption(o => o.setName("target").setDescription("User to receive").setRequired(true))
+            .addIntegerOption(o => o.setName("amount").setDescription("Amount to transfer").setRequired(true)),
+        new SlashCommandBuilder().setName("addcoins").setDescription("Add coins (Admin)").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addUserOption(o => o.setName("target").setDescription("User to add").setRequired(true))
+            .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
+        new SlashCommandBuilder().setName("removecoins").setDescription("Remove coins (Admin)").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addUserOption(o => o.setName("target").setDescription("User to remove").setRequired(true))
+            .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true))
     ];
     
-    await new REST({ version: '10' }).setToken(process.env.TOKEN).put(Routes.applicationCommands(client.user.id), { body: commands });
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    // مسح الأوامر القديمة قبل التسجيل الجديد
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
     console.log("🚀 Bot is Online & Commands Registered!");
 });
 
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
-    await i.deferReply(); 
-    
+    await i.deferReply();
     try {
         const u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
 
@@ -54,17 +65,17 @@ client.on("interactionCreate", async (i) => {
             const amt = i.options.getInteger("amount");
             u.inv.set(item, (u.inv.get(item) || 0) + amt);
             await u.save();
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Purchased ${amt} of ${item}`)] });
+            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Bought ${amt} of ${item}`)] });
         }
 
         if (i.commandName === "transfer") {
             const target = i.options.getUser("target");
             const amt = i.options.getInteger("amount");
-            if (u.coins < amt) return i.editReply("❌ Insufficient funds.");
+            if (u.coins < amt) return i.editReply("❌ Not enough coins.");
             let tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
             u.coins -= amt; tU.coins += amt;
             await u.save(); await tU.save();
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Sent ${amt} to ${target.username}`)] });
+            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Transferred ${amt} to ${target.username}`)] });
         }
 
         if (i.commandName === "addcoins" || i.commandName === "removecoins") {
@@ -74,11 +85,11 @@ client.on("interactionCreate", async (i) => {
             if (i.commandName === "addcoins") tU.coins += amt;
             else tU.coins = Math.max(0, tU.coins - amt);
             await tU.save();
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ ${i.commandName} successful. New balance: ${tU.coins}`)] });
+            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Done. New balance: ${tU.coins}`)] });
         }
     } catch (e) {
         console.error(e);
-        i.editReply("⚠️ Error occurred.");
+        i.editReply("⚠️ An error occurred.");
     }
 });
 
