@@ -33,6 +33,7 @@ const cmds = [
     { name: "removeitem", description: "Admin: Remove item", default_member_permissions: "8", options: [{ name: "name", type: 3, description: "Name", required: true }] },
     { name: "addcoins", description: "Admin: Add coins", default_member_permissions: "8", options: [{ name: "target", type: 6, description: "User", required: true }, { name: "amount", type: 4, description: "Amount", required: true }] },
     { name: "removecoins", description: "Admin: Remove coins", default_member_permissions: "8", options: [{ name: "target", type: 6, description: "User", required: true }, { name: "amount", type: 4, description: "Amount", required: true }] },
+    { name: "transfer", description: "Transfer coins to another user", options: [{ name: "target", type: 6, description: "User to send coins to", required: true }, { name: "amount", type: 4, description: "Amount to transfer", required: true }] },
     { name: "reload", description: "Admin: Reload commands", default_member_permissions: "8" }
 ];
 
@@ -223,6 +224,50 @@ client.on("interactionCreate", async (i) => {
                         { name: adding ? "Added" : "Removed", value: `${amount} coins`, inline: true },
                         { name: "New Balance", value: `${rec.coins} coins`, inline: true }
                     );
+                await reply(i, embed);
+                break;
+            }
+
+            case "transfer": {
+                const target = i.options.getUser("target");
+                const amount = i.options.getInteger("amount");
+
+                if (target.id === i.user.id) {
+                    const embed = new EmbedBuilder().setColor(0xE74C3C).setDescription("❌ You can't transfer coins to yourself!");
+                    return await reply(i, embed);
+                }
+                if (target.bot) {
+                    const embed = new EmbedBuilder().setColor(0xE74C3C).setDescription("❌ You can't transfer coins to a bot!");
+                    return await reply(i, embed);
+                }
+                if (amount <= 0) {
+                    const embed = new EmbedBuilder().setColor(0xE74C3C).setDescription("❌ Amount must be greater than 0.");
+                    return await reply(i, embed);
+                }
+                if (u.coins < amount) {
+                    const embed = new EmbedBuilder().setColor(0xE74C3C).setDescription(`❌ Not enough coins. You have **${u.coins}**, trying to send **${amount}**.`);
+                    return await reply(i, embed);
+                }
+
+                let rec = await User.findOne({ id: target.id });
+                if (!rec) rec = await new User({ id: target.id }).save();
+
+                u.coins -= amount;
+                rec.coins += amount;
+                await u.save();
+                await rec.save();
+
+                const embed = new EmbedBuilder()
+                    .setColor(0x3498DB)
+                    .setTitle("💸 Transfer Successful")
+                    .addFields(
+                        { name: "From", value: `<@${i.user.id}>`, inline: true },
+                        { name: "To", value: `<@${target.id}>`, inline: true },
+                        { name: "Amount", value: `${amount} coins`, inline: true },
+                        { name: "Your Balance", value: `${u.coins} coins`, inline: true },
+                        { name: "Their Balance", value: `${rec.coins} coins`, inline: true }
+                    )
+                    .setTimestamp();
                 await reply(i, embed);
                 break;
             }
