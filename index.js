@@ -66,48 +66,50 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
+    await i.deferReply(); // تم تفعيل الرد المؤجل لكل الأوامر
+    
     let u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
     
-    if (i.commandName === "balance") return i.reply(`Coins: **${u.coins}**`);
+    if (i.commandName === "balance") return i.editReply(`Coins: **${u.coins}**`);
     if (i.commandName === "shop") {
         const items = await ShopItem.find({});
-        return i.reply(items.length ? items.map(v => `• ${v.name}: ${v.price}`).join("\n") : "Empty");
+        return i.editReply(items.length ? items.map(v => `• ${v.name}: ${v.price}`).join("\n") : "Empty");
     }
     if (i.commandName === "additem") {
         await ShopItem.findOneAndUpdate({ name: i.options.getString("name") }, { price: i.options.getInteger("price"), stock: i.options.getInteger("stock") }, { upsert: true });
-        return i.reply("✅ Item added.");
+        return i.editReply("✅ Item added.");
     }
     if (i.commandName === "buy") {
         const item = await ShopItem.findOne({ name: i.options.getString("item") });
-        if (!item || item.stock < i.options.getInteger("amount")) return i.reply("❌ Error!");
+        if (!item || item.stock < i.options.getInteger("amount")) return i.editReply("❌ Error!");
         u.coins -= (item.price * i.options.getInteger("amount"));
         item.stock -= i.options.getInteger("amount");
         u.inv.set(item.name, (u.inv.get(item.name) || 0) + i.options.getInteger("amount"));
         await u.save(); await item.save();
-        return i.reply("🛒 Bought!");
+        return i.editReply("🛒 Bought!");
     }
     if (i.commandName === "inventory") {
         const target = i.options.getUser("user") || i.user;
         let tu = await User.findOne({ id: target.id }) || new User({ id: target.id });
-        return i.reply(Array.from(tu.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty!");
+        return i.editReply(Array.from(tu.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty!");
     }
     if (i.commandName === "addcoins") {
         const t = i.options.getUser("user");
         let tu = await User.findOne({ id: t.id }) || new User({ id: t.id });
         tu.coins += i.options.getInteger("amount");
         await tu.save();
-        return i.reply("💰 Added.");
+        return i.editReply("💰 Added.");
     }
     if (i.commandName === "removecoins") {
         const t = i.options.getUser("user");
         let tu = await User.findOne({ id: t.id }) || new User({ id: t.id });
         tu.coins = Math.max(0, tu.coins - i.options.getInteger("amount"));
         await tu.save();
-        return i.reply("📉 Removed.");
+        return i.editReply("📉 Removed.");
     }
     if (i.commandName === "leaderboard") {
         const top = await User.find({}).sort({ coins: -1 }).limit(10);
-        return i.reply(top.map((u, idx) => `#${idx + 1} <@${u.id}>: ${u.coins}`).join("\n"));
+        return i.editReply(top.map((u, idx) => `#${idx + 1} <@${u.id}>: ${u.coins}`).join("\n"));
     }
 });
 
