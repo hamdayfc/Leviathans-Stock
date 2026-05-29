@@ -7,15 +7,18 @@ const app = express();
 app.get('/', (req, res) => res.send('Bot is active'));
 app.listen(process.env.PORT || 3000);
 
-// أضفنا GatewayIntentBits.MessageContent للقراءة للرسائل
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ DB Connected"));
 
+// Schema محسنة جداً لتجنب الـ ValidationError
+const User = mongoose.model("User", new mongoose.Schema({ 
+    id: { type: String, required: true, unique: true }, 
+    coins: { type: Number, default: 0 }, 
+    inv: { type: Map, of: Number, default: {} } 
+}));
 const ShopItem = mongoose.model("ShopItem", new mongoose.Schema({ name: String, price: Number }));
-const User = mongoose.model("User", new mongoose.Schema({ id: String, coins: { type: Number, default: 0 }, inv: { type: Map, of: Number, default: {} } }));
 
-// دالة تسجيل الأوامر (لإعادة استخدامها)
 const registerCommands = async () => {
     const commands = [
         new SlashCommandBuilder().setName("balance").setDescription("Check balance").addUserOption(o => o.setName("target").setDescription("User")),
@@ -39,23 +42,26 @@ client.once("ready", async () => {
     console.log("🚀 System fully operational.");
 });
 
-// الأمر السري $reload
 client.on("messageCreate", async (msg) => {
-    if (msg.content === "$reload" && msg.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (msg.content === "$reload" && msg.member?.permissions.has(PermissionFlagsBits.Administrator)) {
         await registerCommands();
-        msg.reply("✅ Commands reloaded successfully!");
+        msg.reply("✅ Commands reloaded!");
     }
 });
 
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
     await i.deferReply();
-    const u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
+    
+    // استرجاع أو إنشاء مستخدم بحماية كاملة
+    let u = await User.findOne({ id: i.user.id });
+    if (!u) u = await new User({ id: i.user.id }).save();
 
     try {
         if (i.commandName === "balance") {
             const target = i.options.getUser("target") || i.user;
-            const tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
+            let tU = await User.findOne({ id: target.id });
+            if (!tU) tU = { coins: 0 };
             return i.editReply({ embeds: [new EmbedBuilder().setDescription(`💰 ${target.username} balance: ${tU.coins}`)] });
         }
         if (i.commandName === "shop") {
@@ -67,7 +73,7 @@ client.on("interactionCreate", async (i) => {
             const name = i.options.getString("name").toLowerCase();
             const price = i.options.getInteger("price");
             await ShopItem.updateOne({ name }, { name, price }, { upsert: true });
-            return i.editReply(`✅ Item ${name} added with price ${price}.`);
+            return i.editReply(`✅ Item ${name} added/updated.`);
         }
         if (i.commandName === "removeitem") {
             const name = i.options.getString("name").toLowerCase();
@@ -76,8 +82,9 @@ client.on("interactionCreate", async (i) => {
         }
         if (i.commandName === "inventory") {
             const target = i.options.getUser("target") || i.user;
-            const tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
-            return i.editReply({ embeds: [new EmbedBuilder().setTitle(`${target.username} inventory`).setDescription(Array.from(tU.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty")] });
+            const tU = await User.findOne({ id: target.id }) || { inv: new Map() };
+            const invMap = tU.inv instanceof Map ? tU.inv : new Map(Object.entries(tU.inv || {}));
+            return i.editReply({ embeds: [new EmbedBuilder().setTitle(`${target.username} inventory`).setDescription(Array.from(invMap.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty")] });
         }
         if (i.commandName === "buy") {
             const name = i.options.getString("item").toLowerCase();
@@ -94,7 +101,8 @@ client.on("interactionCreate", async (i) => {
             const target = i.options.getUser("target");
             const amt = i.options.getInteger("amount");
             if (u.coins < amt) return i.editReply("❌ Not enough coins.");
-            let tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
+            let tU = await User.findOne({ id: target.id });
+            if (!tU) tU = await new User({ id: target.id }).save();
             u.coins -= amt; tU.coins += amt;
             await u.save(); await tU.save();
             return i.editReply(`✅ Transferred ${amt} to ${target.username}.`);
@@ -106,13 +114,14 @@ client.on("interactionCreate", async (i) => {
         if (i.commandName === "addcoins" || i.commandName === "removecoins") {
             const target = i.options.getUser("target");
             const amt = i.options.getInteger("amount");
-            let tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
+            let tU = await User.findOne({ id: target.id });
+            if (!tU) tU = await new User({ id: target.id }).save();
             if (i.commandName === "addcoins") tU.coins += amt;
             else tU.coins = Math.max(0, tU.coins - amt);
             await tU.save();
             return i.editReply(`✅ Done. New balance: ${tU.coins}`);
         }
-    } catch (e) { console.error(e); i.editReply("⚠️ Error."); }
+    } catch (e) { console.error(e); i.editReply("⚠️ Error processing request."); }
 });
 
 client.login(process.env.TOKEN);
