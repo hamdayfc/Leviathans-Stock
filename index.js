@@ -1,115 +1,57 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
-const express = require("express");
+const { Client, GatewayIntentBits, PermissionFlagsBits, SlashCommandBuilder } = require("discord.js");
 const mongoose = require("mongoose");
 const { setBotStatus } = require("./status.js");
 
-const app = express();
-app.get("/", (req, res) => res.send("Bot is Running!"));
-app.listen(process.env.PORT || 3000, '0.0.0.0');
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
-});
+mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 5000 });
 
-mongoose.connect(process.env.MONGO_URI).then(() => console.log("DB Connected")).catch(console.error);
+const User = mongoose.model("User", new mongoose.Schema({ id: String, coins: { type: Number, default: 0 }, inv: { type: Map, of: Number, default: {} } }));
+const ShopItem = mongoose.model("ShopItem", new mongoose.Schema({ name: String, price: Number, stock: Number }));
 
-const User = mongoose.model("User", new mongoose.Schema({
-    id: String,
-    coins: { type: Number, default: 0 },
-    inv: { type: Map, of: Number, default: {} },
-    lastMessage: { type: Number, default: 0 }
-}));
-const ShopItem = mongoose.model("ShopItem", new mongoose.Schema({
-    name: String,
-    price: Number,
-    stock: Number
-}));
-
-client.on("messageCreate", async (msg) => {
-    if (msg.author.bot || !msg.guild) return;
-    let u = await User.findOne({ id: msg.author.id }) || new User({ id: msg.author.id });
-    if (Date.now() - u.lastMessage >= 15000) {
-        u.coins += 1;
-        u.lastMessage = Date.now();
-        await u.save();
-    }
-});
-
-const commands = [
-  new SlashCommandBuilder().setName("balance").setDescription("Check your coins"),
-  new SlashCommandBuilder().setName("shop").setDescription("View shop items"),
-  new SlashCommandBuilder().setName("additem").setDescription("Add item to shop").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addStringOption(o => o.setName("name").setDescription("Item name").setRequired(true))
-    .addIntegerOption(o => o.setName("price").setDescription("Item price").setRequired(true))
-    .addIntegerOption(o => o.setName("stock").setDescription("Item stock").setRequired(true)),
-  new SlashCommandBuilder().setName("buy").setDescription("Buy an item")
-    .addStringOption(o => o.setName("item").setDescription("Item name").setRequired(true))
-    .addIntegerOption(o => o.setName("amount").setDescription("Quantity").setRequired(true)),
-  new SlashCommandBuilder().setName("inventory").setDescription("View your inventory").addUserOption(o => o.setName("user").setDescription("User to check")),
-  new SlashCommandBuilder().setName("addcoins").setDescription("Add coins to user").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
-    .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
-  new SlashCommandBuilder().setName("removecoins").setDescription("Remove coins").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
-    .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
-  new SlashCommandBuilder().setName("leaderboard").setDescription("Show top 10 users")
-].map(c => c.toJSON());
-
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+const userCache = new Map();
 
 client.once("ready", async () => {
-    console.log(`Logged in as ${client.user.tag}!`);
+    console.log("Bot Ready!");
     setBotStatus(client);
-    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
 });
 
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
-    await i.deferReply(); // تم تفعيل الرد المؤجل لكل الأوامر
+    await i.deferReply();
     
-    let u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
-    
-    if (i.commandName === "balance") return i.editReply(`Coins: **${u.coins}**`);
-    if (i.commandName === "shop") {
-        const items = await ShopItem.find({});
-        return i.editReply(items.length ? items.map(v => `• ${v.name}: ${v.price}`).join("\n") : "Empty");
+    // جلب أو إنشاء المستخدم
+    let u = userCache.get(i.user.id);
+    if (!u) {
+        u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
+        userCache.set(i.user.id, u);
     }
-    if (i.commandName === "additem") {
-        await ShopItem.findOneAndUpdate({ name: i.options.getString("name") }, { price: i.options.getInteger("price"), stock: i.options.getInteger("stock") }, { upsert: true });
-        return i.editReply("✅ Item added.");
-    }
-    if (i.commandName === "buy") {
-        const item = await ShopItem.findOne({ name: i.options.getString("item") });
-        if (!item || item.stock < i.options.getInteger("amount")) return i.editReply("❌ Error!");
-        u.coins -= (item.price * i.options.getInteger("amount"));
-        item.stock -= i.options.getInteger("amount");
-        u.inv.set(item.name, (u.inv.get(item.name) || 0) + i.options.getInteger("amount"));
-        await u.save(); await item.save();
-        return i.editReply("🛒 Bought!");
-    }
-    if (i.commandName === "inventory") {
-        const target = i.options.getUser("user") || i.user;
-        let tu = await User.findOne({ id: target.id }) || new User({ id: target.id });
-        return i.editReply(Array.from(tu.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty!");
-    }
-    if (i.commandName === "addcoins") {
-        const t = i.options.getUser("user");
-        let tu = await User.findOne({ id: t.id }) || new User({ id: t.id });
-        tu.coins += i.options.getInteger("amount");
-        await tu.save();
-        return i.editReply("💰 Added.");
-    }
-    if (i.commandName === "removecoins") {
-        const t = i.options.getUser("user");
-        let tu = await User.findOne({ id: t.id }) || new User({ id: t.id });
-        tu.coins = Math.max(0, tu.coins - i.options.getInteger("amount"));
-        await tu.save();
-        return i.editReply("📉 Removed.");
-    }
-    if (i.commandName === "leaderboard") {
-        const top = await User.find({}).sort({ coins: -1 }).limit(10);
-        return i.editReply(top.map((u, idx) => `#${idx + 1} <@${u.id}>: ${u.coins}`).join("\n"));
+
+    try {
+        if (i.commandName === "balance") {
+            return i.editReply(`Coins: **${u.coins}**`);
+        }
+        
+        if (i.commandName === "addcoins") {
+            const amount = i.options.getInteger("amount");
+            u.coins += amount;
+            await u.save(); // حفظ التعديل فوراً
+            userCache.set(i.user.id, u); // تحديث الكاش
+            return i.editReply(`💰 Added ${amount} coins. New total: ${u.coins}`);
+        }
+
+        if (i.commandName === "shop") {
+            const items = await ShopItem.find({});
+            return i.editReply(items.length ? items.map(v => `• ${v.name}: ${v.price}`).join("\n") : "Empty");
+        }
+
+        if (i.commandName === "inventory") {
+            return i.editReply(Array.from(u.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty!");
+        }
+    } catch (err) {
+        console.error(err);
+        return i.editReply("❌ Error occurred.");
     }
 });
 
