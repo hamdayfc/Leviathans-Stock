@@ -37,19 +37,23 @@ client.on("messageCreate", async (msg) => {
 });
 
 const commands = [
-    new SlashCommandBuilder().setName("balance").setDescription("Check coins"),
-    new SlashCommandBuilder().setName("shop").setDescription("View shop"),
-    new SlashCommandBuilder().setName("additem").setDescription("Add item").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(o => o.setName("name").setRequired(true))
-        .addIntegerOption(o => o.setName("price").setRequired(true))
-        .addIntegerOption(o => o.setName("stock").setRequired(true)),
-    new SlashCommandBuilder().setName("buy").setDescription("Buy item")
-        .addStringOption(o => o.setName("item").setRequired(true))
-        .addIntegerOption(o => o.setName("amount").setRequired(true)),
-    new SlashCommandBuilder().setName("inventory").setDescription("View inv").addUserOption(o => o.setName("user")),
-    new SlashCommandBuilder().setName("addcoins").setDescription("Add").addUserOption(o => o.setName("user").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
-    new SlashCommandBuilder().setName("removecoins").setDescription("Remove").addUserOption(o => o.setName("user").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
-    new SlashCommandBuilder().setName("leaderboard").setDescription("Top 10")
+  new SlashCommandBuilder().setName("balance").setDescription("Check your coins"),
+  new SlashCommandBuilder().setName("shop").setDescription("View shop items"),
+  new SlashCommandBuilder().setName("additem").setDescription("Add item to shop").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("name").setDescription("Item name").setRequired(true))
+    .addIntegerOption(o => o.setName("price").setDescription("Item price").setRequired(true))
+    .addIntegerOption(o => o.setName("stock").setDescription("Item stock").setRequired(true)),
+  new SlashCommandBuilder().setName("buy").setDescription("Buy an item")
+    .addStringOption(o => o.setName("item").setDescription("Item name").setRequired(true))
+    .addIntegerOption(o => o.setName("amount").setDescription("Quantity").setRequired(true)),
+  new SlashCommandBuilder().setName("inventory").setDescription("View your inventory").addUserOption(o => o.setName("user").setDescription("User to check")),
+  new SlashCommandBuilder().setName("addcoins").setDescription("Add coins to user").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
+    .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
+  new SlashCommandBuilder().setName("removecoins").setDescription("Remove coins").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addUserOption(o => o.setName("user").setDescription("User").setRequired(true))
+    .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
+  new SlashCommandBuilder().setName("leaderboard").setDescription("Show top 10 users")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
