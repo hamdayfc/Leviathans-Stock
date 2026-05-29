@@ -6,12 +6,26 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
     ]
 });
 
+// ─── MongoDB Connect ───────────────────────────────────────────────────────────
 mongoose.connect(process.env.MONGO_URI).catch(err => console.error("MongoDB error:", err));
 
+mongoose.connection.on("disconnected", () => {
+    console.warn("⚠️ MongoDB disconnected! Reconnecting...");
+    setTimeout(() => {
+        mongoose.connect(process.env.MONGO_URI).catch(err => console.error("MongoDB reconnect error:", err));
+    }, 5000);
+});
+
+mongoose.connection.on("connected", () => {
+    console.log("✅ MongoDB connected!");
+});
+
+// ─── Models ────────────────────────────────────────────────────────────────────
 const User = mongoose.model("User", new mongoose.Schema({
     id: String,
     coins: { type: Number, default: 0 },
@@ -24,6 +38,16 @@ const ShopItem = mongoose.model("ShopItem", new mongoose.Schema({
     quantity: { type: Number, default: 0 }
 }));
 
+const MessageReward = mongoose.model("MessageReward", new mongoose.Schema({
+    id: String,
+    lastRewarded: { type: Date, default: null }
+}));
+
+// ─── Constants ─────────────────────────────────────────────────────────────────
+const MAX_COINS_CAP = 1500;
+const REWARD_COOLDOWN_MS = 15000;
+
+// ─── Commands ──────────────────────────────────────────────────────────────────
 const cmds = [
     { name: "balance", description: "Check balance", options: [{ name: "target", type: 6, description: "Select user", required: false }] },
     { name: "shop", description: "View shop" },
@@ -43,11 +67,11 @@ async function refresh(c) {
     console.log("✅ Commands registered!");
 }
 
-// Helper: send embed or fallback to text
 async function reply(i, embed) {
     await i.editReply({ embeds: [embed] });
 }
 
+// ─── Ready ─────────────────────────────────────────────────────────────────────
 client.on("ready", async () => {
     try {
         await refresh(client);
@@ -57,10 +81,38 @@ client.on("ready", async () => {
     }
 });
 
+// ─── Message Reward ────────────────────────────────────────────────────────────
+client.on("messageCreate", async (msg) => {
+    if (msg.author.bot) return;
+    if (!msg.guild) return;
+
+    try {
+        let reward = await MessageReward.findOne({ id: msg.author.id });
+        const now = new Date();
+
+        if (reward && reward.lastRewarded && (now - reward.lastRewarded) < REWARD_COOLDOWN_MS) return;
+
+        let u = await User.findOne({ id: msg.author.id });
+        if (!u) u = new User({ id: msg.author.id });
+
+        if (u.coins >= MAX_COINS_CAP) return;
+
+        u.coins = Math.min(u.coins + 1, MAX_COINS_CAP);
+        await u.save();
+
+        if (!reward) reward = new MessageReward({ id: msg.author.id });
+        reward.lastRewarded = now;
+        await reward.save();
+
+    } catch (e) {
+        console.error("messageCreate reward error:", e);
+    }
+});
+
+// ─── Interactions ──────────────────────────────────────────────────────────────
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
 
-    // دايمًا defer أول شي
     try {
         await i.deferReply();
     } catch (e) {
@@ -295,4 +347,32 @@ client.on("interactionCreate", async (i) => {
     }
 });
 
+// ─── Discord Error Handlers ────────────────────────────────────────────────────
+client.on("error", (err) => {
+    console.error("🔴 Discord client error:", err);
+});
+
+client.on("warn", (info) => {
+    console.warn("⚠️ Discord warning:", info);
+});
+
+client.on("disconnect", () => {
+    console.warn("⚠️ Bot disconnected! Attempting to reconnect...");
+    client.login(process.env.TOKEN).catch(console.error);
+});
+
+// ─── Process Error Handlers ────────────────────────────────────────────────────
+process.on("unhandledRejection", (reason) => {
+    console.error("🔴 Unhandled Rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+    console.error("🔴 Uncaught Exception:", err);
+});
+
+process.on("uncaughtExceptionMonitor", (err) => {
+    console.error("🔴 Uncaught Exception Monitor:", err);
+});
+
+// ─── Login ─────────────────────────────────────────────────────────────────────
 client.login(process.env.TOKEN);
