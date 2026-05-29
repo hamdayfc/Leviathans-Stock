@@ -7,89 +7,101 @@ const app = express();
 app.get('/', (req, res) => res.send('Bot is active'));
 app.listen(process.env.PORT || 3000);
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// أضفنا GatewayIntentBits.MessageContent للقراءة للرسائل
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] });
 
 mongoose.connect(process.env.MONGO_URI).then(() => console.log("✅ DB Connected"));
 
+const ShopItem = mongoose.model("ShopItem", new mongoose.Schema({ name: String, price: Number }));
 const User = mongoose.model("User", new mongoose.Schema({ id: String, coins: { type: Number, default: 0 }, inv: { type: Map, of: Number, default: {} } }));
-const SHOP_ITEMS = { "sword": 50, "shield": 30, "potion": 10 };
+
+// دالة تسجيل الأوامر (لإعادة استخدامها)
+const registerCommands = async () => {
+    const commands = [
+        new SlashCommandBuilder().setName("balance").setDescription("Check balance").addUserOption(o => o.setName("target").setDescription("User")),
+        new SlashCommandBuilder().setName("shop").setDescription("View available items"),
+        new SlashCommandBuilder().setName("inventory").setDescription("View inv").addUserOption(o => o.setName("target").setDescription("User")),
+        new SlashCommandBuilder().setName("leaderboard").setDescription("Top 10 richest"),
+        new SlashCommandBuilder().setName("buy").setDescription("Buy items").addStringOption(o => o.setName("item").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
+        new SlashCommandBuilder().setName("transfer").setDescription("Transfer coins").addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
+        new SlashCommandBuilder().setName("additem").setDescription("Add item to shop").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addStringOption(o => o.setName("name").setRequired(true)).addIntegerOption(o => o.setName("price").setRequired(true)),
+        new SlashCommandBuilder().setName("removeitem").setDescription("Remove item from shop").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addStringOption(o => o.setName("name").setRequired(true)),
+        new SlashCommandBuilder().setName("addcoins").setDescription("Admin add").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true)),
+        new SlashCommandBuilder().setName("removecoins").setDescription("Admin remove").setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addUserOption(o => o.setName("target").setRequired(true)).addIntegerOption(o => o.setName("amount").setRequired(true))
+    ];
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+};
 
 client.once("ready", async () => {
-    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-    
-    // 1. مسح شامل لأي أوامر سابقة في ديسكورد لمنع التعارض
-    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
-    console.log("🧹 Old commands cleared.");
+    await registerCommands();
+    console.log("🚀 System fully operational.");
+});
 
-    // 2. تسجيل الأوامر الجديدة بالتفصيل الممل لمنع الـ Undefined
-    const commands = [
-        new SlashCommandBuilder().setName("balance").setDescription("Check balance")
-            .addUserOption(o => o.setName("target").setDescription("User to check")),
-        new SlashCommandBuilder().setName("shop").setDescription("View available items"),
-        new SlashCommandBuilder().setName("inventory").setDescription("View inv")
-            .addUserOption(o => o.setName("target").setDescription("User")),
-        new SlashCommandBuilder().setName("leaderboard").setDescription("Top 10 richest"),
-        new SlashCommandBuilder().setName("buy").setDescription("Buy items")
-            .addStringOption(o => o.setName("item").setDescription("Name of the item").setRequired(true))
-            .addIntegerOption(o => o.setName("amount").setDescription("Quantity").setRequired(true)),
-        new SlashCommandBuilder().setName("transfer").setDescription("Transfer coins")
-            .addUserOption(o => o.setName("target").setDescription("Target user").setRequired(true))
-            .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
-        new SlashCommandBuilder().setName("addcoins").setDescription("Admin add").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-            .addUserOption(o => o.setName("target").setDescription("Target user").setRequired(true))
-            .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true)),
-        new SlashCommandBuilder().setName("removecoins").setDescription("Admin remove").setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-            .addUserOption(o => o.setName("target").setDescription("Target user").setRequired(true))
-            .addIntegerOption(o => o.setName("amount").setDescription("Amount").setRequired(true))
-    ];
-
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log("🚀 Everything set! Bot is ready.");
+// الأمر السري $reload
+client.on("messageCreate", async (msg) => {
+    if (msg.content === "$reload" && msg.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        await registerCommands();
+        msg.reply("✅ Commands reloaded successfully!");
+    }
 });
 
 client.on("interactionCreate", async (i) => {
     if (!i.isChatInputCommand()) return;
     await i.deferReply();
-    try {
-        const u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
+    const u = await User.findOne({ id: i.user.id }) || new User({ id: i.user.id });
 
+    try {
         if (i.commandName === "balance") {
             const target = i.options.getUser("target") || i.user;
             const tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`💰 **${target.username}** has **${tU.coins}** coins.`)] });
+            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`💰 ${target.username} balance: ${tU.coins}`)] });
         }
         if (i.commandName === "shop") {
-            const items = Object.entries(SHOP_ITEMS).map(([n, p]) => `• **${n}**: ${p} coins`).join("\n");
-            return i.editReply({ embeds: [new EmbedBuilder().setTitle("🛒 Shop").setDescription(items)] });
+            const items = await ShopItem.find({});
+            const list = items.length > 0 ? items.map(x => `• ${x.name}: ${x.price} coins`).join("\n") : "Shop is empty.";
+            return i.editReply({ embeds: [new EmbedBuilder().setTitle("🛒 Shop").setDescription(list)] });
+        }
+        if (i.commandName === "additem") {
+            const name = i.options.getString("name").toLowerCase();
+            const price = i.options.getInteger("price");
+            await ShopItem.updateOne({ name }, { name, price }, { upsert: true });
+            return i.editReply(`✅ Item ${name} added with price ${price}.`);
+        }
+        if (i.commandName === "removeitem") {
+            const name = i.options.getString("name").toLowerCase();
+            const res = await ShopItem.deleteOne({ name });
+            return i.editReply(res.deletedCount > 0 ? `✅ Item ${name} removed.` : "❌ Item not found.");
         }
         if (i.commandName === "inventory") {
             const target = i.options.getUser("target") || i.user;
             const tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
-            return i.editReply({ embeds: [new EmbedBuilder().setTitle(`${target.username}'s Inventory`).setDescription(Array.from(tU.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Your inventory is empty.")] });
+            return i.editReply({ embeds: [new EmbedBuilder().setTitle(`${target.username} inventory`).setDescription(Array.from(tU.inv.entries()).map(([n, c]) => `• ${n}: x${c}`).join("\n") || "Empty")] });
         }
         if (i.commandName === "buy") {
-            const item = i.options.getString("item").toLowerCase();
+            const name = i.options.getString("item").toLowerCase();
             const amt = i.options.getInteger("amount");
-            if (!SHOP_ITEMS[item]) return i.editReply("❌ **Item not found!**");
-            const totalCost = SHOP_ITEMS[item] * amt;
-            if (u.coins < totalCost) return i.editReply("❌ Not enough coins.");
-            u.coins -= totalCost;
-            u.inv.set(item, (u.inv.get(item) || 0) + amt);
+            const item = await ShopItem.findOne({ name });
+            if (!item) return i.editReply("❌ Item not found!");
+            if (u.coins < (item.price * amt)) return i.editReply("❌ Not enough coins.");
+            u.coins -= (item.price * amt);
+            u.inv.set(name, (u.inv.get(name) || 0) + amt);
             await u.save();
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Successfully bought **${amt}x ${item}** for **${totalCost}** coins.`)] });
+            return i.editReply(`✅ Bought ${amt} of ${name}.`);
         }
         if (i.commandName === "transfer") {
             const target = i.options.getUser("target");
             const amt = i.options.getInteger("amount");
-            if (u.coins < amt) return i.editReply("❌ Insufficient funds.");
+            if (u.coins < amt) return i.editReply("❌ Not enough coins.");
             let tU = await User.findOne({ id: target.id }) || new User({ id: target.id });
             u.coins -= amt; tU.coins += amt;
             await u.save(); await tU.save();
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Sent **${amt}** coins to **${target.username}**.`)] });
+            return i.editReply(`✅ Transferred ${amt} to ${target.username}.`);
         }
         if (i.commandName === "leaderboard") {
             const top = await User.find({}).sort({ coins: -1 }).limit(10);
-            return i.editReply({ embeds: [new EmbedBuilder().setTitle("🏆 Top 10 Richest").setDescription(top.map((u, x) => `${x+1}. <@${u.id}>: **${u.coins}**`).join("\n") || "No data")] });
+            return i.editReply({ embeds: [new EmbedBuilder().setTitle("🏆 Leaderboard").setDescription(top.map((u, x) => `${x+1}. <@${u.id}>: ${u.coins}`).join("\n") || "No data")] });
         }
         if (i.commandName === "addcoins" || i.commandName === "removecoins") {
             const target = i.options.getUser("target");
@@ -98,9 +110,9 @@ client.on("interactionCreate", async (i) => {
             if (i.commandName === "addcoins") tU.coins += amt;
             else tU.coins = Math.max(0, tU.coins - amt);
             await tU.save();
-            return i.editReply({ embeds: [new EmbedBuilder().setDescription(`✅ Done. New balance for **${target.username}**: **${tU.coins}**`)] });
+            return i.editReply(`✅ Done. New balance: ${tU.coins}`);
         }
-    } catch (e) { console.error(e); i.editReply("⚠️ An error occurred."); }
+    } catch (e) { console.error(e); i.editReply("⚠️ Error."); }
 });
 
 client.login(process.env.TOKEN);
